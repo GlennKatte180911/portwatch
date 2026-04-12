@@ -1,72 +1,79 @@
+// Package monitor orchestrates periodic port scanning and change detection.
 package monitor
 
 import (
-	"fmt"
+	"context"
+	"log"
 	"time"
 
 	"github.com/user/portwatch/internal/alert"
-	"github.com/user/portwatch/internal/config"
+	"github.com/user/portwatch/internal/history"
 	"github.com/user/portwatch/internal/scanner"
 	"github.com/user/portwatch/internal/snapshot"
 )
 
-// Monitor orchestrates periodic port scanning and change detection.
+// Monitor periodically scans ports and emits alerts on changes.
 type Monitor struct {
-	cfg      *config.Config
 	scanner  *scanner.Scanner
 	notifier *alert.Notifier
+	history  *history.History
+	interval time.Duration
+	snapshotPath string
 }
 
-// New creates a new Monitor with the given configuration.
-func New(cfg *config.Config, notifier *alert.Notifier) *Monitor {
+// New creates a Monitor with the provided components and scan interval.
+func New(
+	s *scanner.Scanner,
+	n *alert.Notifier,
+	h *history.History,
+	interval time.Duration,
+	snapshotPath string,
+) *Monitor {
 	return &Monitor{
-		cfg:      cfg,
-		scanner:  scanner.New(cfg.Timeout),
-		notifier: notifier,
+		scanner:      s,
+		notifier:     n,
+		history:      h,
+		interval:     interval,
+		snapshotPath: snapshotPath,
 	}
 }
 
-// Run starts the monitoring loop. It blocks until the done channel is closed.
-func (m *Monitor) Run(done <-chan struct{}) error {
-	ticker := time.NewTicker(m.cfg.Interval)
+// Run starts the monitoring loop. It blocks until ctx is cancelled.
+func (m *Monitor) Run(ctx context.Context) {
+	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
-
-	if err := m.tick(); err != nil {
-		return fmt.Errorf("initial scan failed: %w", err)
-	}
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
-			if err := m.tick(); err != nil {
-				return fmt.Errorf("scan failed: %w", err)
-			}
-		case <-done:
-			return nil
-		}
-	}
-}
-
-// tick performs a single scan cycle: scan ports, diff against previous snapshot, alert on changes.
-func (m *Monitor) tick() error {
-	ports, err := m.scanner.Scan(m.cfg.StartPort, m.cfg.EndPort)
-	if err != nil {
-		return fmt.Errorf("scanner error: %w", err)
+			m.tick()
+		}unc (m *Monitor) tick {
+	ports, err := m.scanner.("monitor err)
+		return
 	}
 
 	current := snapshot.New(ports)
 
-	previous, err := snapshot.Load(m.cfg.SnapshotPath)
-	if err == nil {
-		added, removed := snapshot.Diff(previous, current)
-		if len(added) > 0 || len(removed) > 0 {
-			m.notifier.Notify(added, removed)
-		}
+	prev, err := snapshot.Load(m.snapshotPath)
+	if err != nil {
+		log.Printf("monitor: load snapshot: %v", err)
+		_ = current.Save(m.snapshotPath)
+		return
 	}
 
-	if err := current.Save(m.cfg.SnapshotPath); err != nil {
-		return fmt.Errorf("failed to save snapshot: %w", err)
+	diff := snapshot.Diff(prev, current)
+	if len(diff.Added) == 0 && len(diff.Removed) == 0 {
+		_ = current.Save(m.snapshotPath)
+		return
 	}
 
-	return nil
+	m.notifier.Notify(diff)
+
+	if err := m.history.Record(diff.Added, diff.Removed); err != nil {
+		log.Printf("monitor: history record error: %v", err)
+	}
+
+	_ = current.Save(m.snapshotPath)
 }
