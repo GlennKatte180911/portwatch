@@ -3,6 +3,7 @@ package snapshot
 import (
 	"encoding/json"
 	"os"
+	"sort"
 	"time"
 )
 
@@ -49,6 +50,7 @@ func Load(path string) (*Snapshot, error) {
 }
 
 // Diff compares two snapshots and returns added and removed ports.
+// Both slices in the result are sorted in ascending order.
 func Diff(previous, current *Snapshot) (added, removed []int) {
 	prev := toSet(previous.Ports)
 	curr := toSet(current.Ports)
@@ -63,6 +65,9 @@ func Diff(previous, current *Snapshot) (added, removed []int) {
 			removed = append(removed, p)
 		}
 	}
+
+	sort.Ints(added)
+	sort.Ints(removed)
 	return added, removed
 }
 
