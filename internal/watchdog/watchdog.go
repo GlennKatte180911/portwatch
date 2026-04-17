@@ -46,9 +46,16 @@ func (w *Watchdog) LastBeat() time.Time {
 	return w.lastBeat
 }
 
+// deadline returns the time at which the next heartbeat must arrive.
+func (w *Watchdog) deadline() time.Duration {
+	return w.interval + w.grace
+}
+
 // Run starts the watchdog loop. It blocks until ctx is cancelled.
+// The watchdog fires onStall once per stall event; it resets when a new
+// heartbeat arrives before the next tick.
 func (w *Watchdog) Run(ctx context.Context) {
-	ticker := time.NewTicker(w.interval + w.grace)
+	ticker := time.NewTicker(w.deadline())
 	defer ticker.Stop()
 
 	stalled := false
@@ -62,7 +69,7 @@ func (w *Watchdog) Run(ctx context.Context) {
 			last := w.lastBeat
 			w.mu.Unlock()
 
-			if now.Sub(last) > w.interval+w.grace {
+			if now.Sub(last) > w.deadline() {
 				if !stalled {
 					stalled = true
 					if w.onStall != nil {
