@@ -87,3 +87,14 @@ func (p *Policy) Apply(ports []int) []Result {
 	}
 	return denied
 }
+
+// EvaluateAll evaluates every port and returns results for all of them,
+// regardless of the resulting action. This is useful for auditing or
+// producing a complete report of what the policy would do.
+func (p *Policy) EvaluateAll(ports []int) []Result {
+	results := make([]Result, 0, len(ports))
+	for _, port := range ports {
+		results = append(results, p.Evaluate(port))
+	}
+	return results
+}
